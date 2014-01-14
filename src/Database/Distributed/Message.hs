@@ -2,7 +2,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 
 
-module Message where
+module Database.Distributed.Message where
 
 
 import Data.Binary

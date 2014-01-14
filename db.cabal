@@ -1,0 +1,31 @@
+
+name:                db
+version:             0.1.0.0
+synopsis:            A distributed database.
+license:             BSD3
+license-file:        LICENSE
+author:              Markus Liedl, Heinrich Hördegen
+maintainer:          hoerdegen@funktional.info
+category:            Distribution
+build-type:          Simple
+cabal-version:       >=1.8
+
+
+executable database-distributed
+
+  main-is: Main.hs
+
+  build-depends:
+    base ==4.5.*,
+    distributed-process ==0.4.*,
+    distributed-process-simplelocalnet ==0.2.*,
+    binary ==0.6.*, ghc-prim ==0.2.*,
+    containers ==0.4.*, bimap ==0.2.*,
+    parsec ==3.1.*,
+    network ==2.4.*,
+    random ==1.0.*
+
+  GHC-Options: -Wall -fwarn-incomplete-uni-patterns -fwarn-tabs
+
+  hs-source-dirs:      src, test
+  

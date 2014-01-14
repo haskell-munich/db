@@ -2,26 +2,20 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module Main where
+module Database.Distributed.Server where
 
 -- UDP reparieren mit:
 -- sudo route add -net 224.0.0.0 netmask 224.0.0.0 lo
 
-import Message
-import Parser
+import Database.Distributed.Message
+import Database.Distributed.Parser
 
-import Data.Binary
-import Data.Typeable
-import GHC.Generics (Generic)
 
-import System.Environment (getArgs)
 import Control.Distributed.Process
-import Control.Distributed.Process.Closure
-import Control.Distributed.Process.Node (initRemoteTable, runProcess)
 import Control.Distributed.Process.Backend.SimpleLocalnet
 
-import qualified Data.Map as Map; import Data.Map (Map)
-import qualified Data.Bimap as Bimap; import Data.Bimap (Bimap)
+import qualified Data.Map as Map
+import qualified Data.Bimap as Bimap
 
 import qualified Network as Net
 
@@ -29,19 +23,17 @@ import System.Random
 
 import Text.Printf (printf, hPrintf)
 
-import Control.Applicative (liftA2)
 
-import Control.Monad (zipWithM_, zipWithM, mapM_, mapM, forever)
-import Control.Concurrent (threadDelay, forkIO)
+import Control.Monad (forever, void)
 
 
 import System.IO
-  ( hGetLine, hSetNewlineMode, hSetBuffering,
-    BufferMode(LineBuffering, NoBuffering), Handle,
+  ( hSetNewlineMode, hSetBuffering,
+    BufferMode(NoBuffering), Handle,
     hPutStrLn,
-    universalNewlineMode, stdout)
+    universalNewlineMode)
 
-
+{-
 --pm :: ProcessMap
 pm = Map.fromList $
   (2, 10001) :
@@ -53,7 +45,7 @@ pm = Map.fromList $
   (12, 10007) :
   (9, 10008) :
   []
-
+-}
 
 responsibleProcess :: ProcessMap -> Key -> [ProcessId]
 responsibleProcess pm k = map snd as
@@ -76,7 +68,7 @@ registerStr = "database"
 
 repl :: ProcessId -> Int -> Process ()
 repl pid myPort = do
-  liftIO $ printf "Listening on port %d\n" myPort
+  liftIO $ void $ printf "Listening on port %d\n" myPort
   sock <- liftIO $ Net.listenOn (Net.PortNumber $ fromIntegral myPort)
   forever $ do
     (hdl, _, _) <- liftIO $ Net.accept sock
@@ -102,11 +94,9 @@ repl2 pid hdl = do
                    match $ return ]
                  liftIO $ hPutStrLn hdl res
 
-           liftIO $ hPrintf hdl ("recognised: " ++ show cs ++ "\n")
+           liftIO $ void $ hPrintf hdl ("recognised: " ++ show cs ++ "\n")
            mapM_ exec cs
 
-
-remotable []
 
 
 server :: Center -> Backend -> (ProcessMap, StorageMap) -> Process ()
@@ -123,7 +113,11 @@ server centerKey backend (pm, sm) = do
   server centerKey backend m
   where 
         database msg@(from, (Lookup key)) = do
-          let (pid:_) = responsibleProcess pm key
+          let pid =
+                case responsibleProcess pm key of
+                     (q:_) -> q
+                     _ -> error "Server.server: no responsible process found"
+
           mypid <- getSelfPid
           if pid /= mypid
              then send pid msg
@@ -131,7 +125,10 @@ server centerKey backend (pm, sm) = do
           return (pm, sm)
 
         database msg@(from, (Insert key value)) = do
-          let p@(pid:_) = responsibleProcess pm key
+          let (p, pid) =
+                case responsibleProcess pm key of
+                     r@(q:_) -> (r, q)
+                     _ -> error "Server.server: no responsible process found"
           liftIO $ print p
           mypid <- getSelfPid
           if pid /= mypid
@@ -141,12 +138,20 @@ server centerKey backend (pm, sm) = do
                      let newsm = Map.insert key value sm
                      return (pm, newsm)
 
+        database msg = do
+          liftIO $ print $ "server.database: " ++ show msg
+          undefined
 
 
-        whereIsReply (WhereIsReply str (Just pid)) = do
+
+        whereIsReply (WhereIsReply _ (Just pid)) = do
           mypid <- getSelfPid
           send pid (AskCenter mypid centerKey)
           return (pm, sm)
+
+        whereIsReply msg = do
+          liftIO $ print $ "whereIsReply.database " ++ show msg
+          undefined
 
         processMessage (AskCenter pid ck) = do
           let newpm = Bimap.insert ck pid pm
@@ -156,7 +161,7 @@ server centerKey backend (pm, sm) = do
 
         processMessage (TellCenter pid ck) = do
           let newpm = Bimap.insert ck pid pm
-          monitor pid
+          void $ monitor pid
           return (newpm, sm)
 
         monitorEvent (ProcessMonitorNotification _ pid _) = do
@@ -174,16 +179,8 @@ master backend = do
   pid <- getSelfPid
   register registerStr pid
 
-  spawnLocal $ repl pid (10000+centerKey)
+  void $ spawnLocal $ repl pid (10000+centerKey)
 
   mapM_ (flip whereisRemoteAsync registerStr) slaves
   server centerKey backend (Bimap.empty, Map.empty)
 
-
-
-main :: IO ()
-main = do
-  [host, port] <- getArgs
-  backend <- initializeBackend host port (__remoteTable initRemoteTable)
-  node <- newLocalNode backend
-  runProcess node (master backend)

@@ -1,25 +1,22 @@
 
+module Database.Distributed.Parser where
 
 
-module Parser where
-
-
-import Message
+import Database.Distributed.Message
 
 import Text.ParserCombinators.Parsec
 
+import System.IO (hGetLine, Handle)
+
+import Text.Printf (hPrintf)
+
+import qualified Data.Char as Char
+
 import Control.Applicative (liftA, liftA2, (<*), (*>))
-
-import System.IO
-  ( hGetLine, hSetNewlineMode, hSetBuffering,
-    BufferMode(LineBuffering, NoBuffering), Handle,
-    universalNewlineMode, stdout)
-
-import Text.Printf (hPrintf, printf)
+import Control.Monad (void)
 
 import Prelude hiding (lookup)
 
-import qualified Data.Char as Char
 
 symbol :: String -> Parser String
 symbol name = lexeme (string name)
@@ -54,7 +51,7 @@ commands =
 
 prompt :: Handle -> IO (Maybe [Message])
 prompt hdl = do
-  hPrintf hdl "$> "
+  void $ hPrintf hdl "$> "
   line <- hGetLine hdl
   putStrLn line
   case parse commands "command line" line of
