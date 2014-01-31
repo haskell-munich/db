@@ -26,7 +26,6 @@ import Text.Printf (printf, hPrintf)
 
 import Control.Monad (forever, void)
 
-
 import System.IO
   ( hSetNewlineMode, hSetBuffering,
     BufferMode(NoBuffering), Handle,
@@ -35,24 +34,25 @@ import System.IO
 
 {-
 --pm :: ProcessMap
-pm = Map.fromList $
-  (2, 10001) :
+pm = Bimap.fromList $
   (1, 10002) :
-  (4, 10003) :
+  (2, 10001) :
   (3, 10004) :
-  (10, 10005) :
-  (18, 10006) :
-  (12, 10007) :
+  (4, 10003) :
   (9, 10008) :
+  (10, 10005) :
+  (12, 10007) :
+  (18, 10006) :
   []
 -}
 
+
 responsibleProcess :: ProcessMap -> Key -> [ProcessId]
 responsibleProcess pm k = map snd as
-  where (l, g) = Map.split k (Bimap.toMap pm)
+  where (l, g) = Map.partitionWithKey (\x _ -> x <= k) (Bimap.toMap pm)
         as = merge (map f $ Map.toDescList l)
                    (map f $ Map.toAscList g)
-        f (a, b) = (a-k, b)
+        f (a, b) = (abs (a-k), b)
         merge [] ys = ys
         merge xs [] = xs
         merge (x:xs) (y:ys) =
