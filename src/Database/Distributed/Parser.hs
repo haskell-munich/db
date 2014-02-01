@@ -3,6 +3,7 @@ module Database.Distributed.Parser where
 
 
 import Database.Distributed.Message
+import Database.Distributed.Key
 
 import Text.ParserCombinators.Parsec
 
@@ -36,17 +37,31 @@ anyString = many (noneOf ";")
 
 
 insert :: Parser Message
-insert = liftA2 Insert (symbol "ins" *> unsigned_int) anyString
+insert = liftA2 (Insert . Key) (symbol "ins" *> unsigned_int) anyString
 
 lookup :: Parser Message
-lookup = liftA Lookup (symbol "look" *> unsigned_int)
+lookup = liftA (Lookup . Key) (symbol "look" *> unsigned_int)
 
 delete :: Parser Message
-delete = liftA Delete (symbol "del" *> unsigned_int)
+delete = liftA (Delete . Key) (symbol "del" *> unsigned_int)
+
+
+
+center :: Parser ShowMessage
+center = symbol "cen" >> return ShowCenter
+
+stoMap :: Parser ShowMessage
+stoMap = symbol "sto" >> return ShowStorageMap
+
+proMap :: Parser ShowMessage
+proMap = symbol "pro" >> return ShowProcessMap
+
+showCmd :: Parser Message
+showCmd = symbol "show" *> liftA SM (center <|> stoMap <|> proMap)
 
 commands :: Parser [Message]
 commands =
-  many (whiteSpace *> (insert <|> lookup <|> delete) <* char ';')
+  many (whiteSpace *> (insert <|> lookup <|> delete <|> showCmd) <* char ';')
 
 
 prompt :: Handle -> IO (Maybe [Message])

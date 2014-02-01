@@ -9,6 +9,9 @@ module Database.Distributed.Server where
 
 import Database.Distributed.Message
 import Database.Distributed.Parser
+import Database.Distributed.Key
+
+import qualified Database.Distributed.StorageMap as StorageMap
 
 
 import Control.Distributed.Process
@@ -19,10 +22,8 @@ import qualified Data.Bimap as Bimap
 
 import qualified Network as Net
 
-import System.Random
-
 import Text.Printf (printf, hPrintf)
-
+import Data.Acid (AcidState)
 
 import Control.Monad (forever, void)
 
@@ -48,11 +49,11 @@ pm = Bimap.fromList $
 
 
 responsibleProcess :: ProcessMap -> Key -> [ProcessId]
-responsibleProcess pm k = map snd as
-  where (l, g) = Map.partitionWithKey (\x _ -> x <= k) (Bimap.toMap pm)
+responsibleProcess pm (Key k) = map snd as
+  where (l, g) = Map.partitionWithKey (\(Key x) _ -> x <= k) (Bimap.toMap pm)
         as = merge (map f $ Map.toDescList l)
                    (map f $ Map.toAscList g)
-        f (a, b) = (abs (a-k), b)
+        f (Key a, b) = (abs (a-k), b)
         merge [] ys = ys
         merge xs [] = xs
         merge (x:xs) (y:ys) =
@@ -99,19 +100,23 @@ repl2 pid hdl = do
 
 
 
-server :: Center -> Backend -> (ProcessMap, StorageMap) -> Process ()
+server ::
+  Center ->
+  Backend ->
+  (ProcessMap, AcidState StorageMap.T) ->
+  Process ()
 server centerKey backend (pm, sm) = do
-  -- liftIO $ print pm
-  liftIO $ print centerKey
-  liftIO $ print sm
   m <- receiveWait $
          match database :
          match whereIsReply :
          match processMessage :
          match monitorEvent :
+         match broadcastEvent :
          []
   server centerKey backend m
-  where 
+  where
+        returnMaps pmap smap = return (pmap, smap)
+
         database msg@(from, (Lookup key)) = do
           let pid =
                 case responsibleProcess pm key of
@@ -121,8 +126,9 @@ server centerKey backend (pm, sm) = do
           mypid <- getSelfPid
           if pid /= mypid
              then send pid msg
-             else send from (Map.lookup key sm)
-          return (pm, sm)
+             else do v <- StorageMap.lookup key sm
+                     send from v
+          returnMaps pm sm
 
         database msg@(from, (Insert key value)) = do
           let (p, pid) =
@@ -133,21 +139,39 @@ server centerKey backend (pm, sm) = do
           mypid <- getSelfPid
           if pid /= mypid
              then do send pid msg
-                     return (pm, sm)
+                     returnMaps pm sm
              else do send from "Insert ok!"
-                     let newsm = Map.insert key value sm
-                     return (pm, newsm)
+                     StorageMap.insert key value sm
+                     returnMaps pm sm
+
+        database (from, SM msg) = do
+          let ks = Bimap.elems pm
+          mapM_ (flip send (Broadcast msg)) ks
+          send from "Ok!"
+          returnMaps pm sm
+
 
         database msg = do
           liftIO $ print $ "server.database: " ++ show msg
           undefined
 
+        broadcastEvent (Broadcast ShowCenter) = do
+          liftIO $ putStrLn ("My center is " ++ show centerKey ++ ".")
+          returnMaps pm sm
 
+        broadcastEvent (Broadcast ShowStorageMap) = do
+          smap <- StorageMap.getStorageMap sm
+          liftIO $ print smap
+          returnMaps pm sm
+
+        broadcastEvent (Broadcast ShowProcessMap) = do
+          liftIO $ print pm
+          returnMaps pm sm
 
         whereIsReply (WhereIsReply _ (Just pid)) = do
           mypid <- getSelfPid
           send pid (AskCenter mypid centerKey)
-          return (pm, sm)
+          returnMaps pm sm
 
         whereIsReply msg = do
           liftIO $ print $ "whereIsReply.database " ++ show msg
@@ -157,30 +181,33 @@ server centerKey backend (pm, sm) = do
           let newpm = Bimap.insert ck pid pm
           mypid <- getSelfPid
           send pid (TellCenter mypid centerKey)
-          return (newpm, sm)
+          returnMaps newpm sm
 
         processMessage (TellCenter pid ck) = do
           let newpm = Bimap.insert ck pid pm
           void $ monitor pid
-          return (newpm, sm)
+          returnMaps newpm sm
 
         monitorEvent (ProcessMonitorNotification _ pid _) = do
           let newpm = Bimap.deleteR pid pm
-          return (newpm, sm)
+          returnMaps newpm sm
 
 
 
-master :: Backend -> Process ()
-master backend = do
+
+master :: AcidState StorageMap.T -> Center -> Backend -> Process ()
+master acidsm centerKey backend = do
+  sm <- StorageMap.getStorageMap acidsm
+  liftIO $ print sm
+
   slaves <- liftIO $ findPeers backend 1000
-  centerKey <- liftIO (getStdRandom (randomR (0, 1000 :: Int)))
   say $ "Slaves: " ++ show slaves
 
   pid <- getSelfPid
   register registerStr pid
 
-  void $ spawnLocal $ repl pid (10000+centerKey)
+  void $ spawnLocal $ repl pid (10000 + unKey centerKey)
 
   mapM_ (flip whereisRemoteAsync registerStr) slaves
-  server centerKey backend (Bimap.empty, Map.empty)
+  server centerKey backend (Bimap.empty, acidsm)
 
