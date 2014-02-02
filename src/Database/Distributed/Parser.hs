@@ -4,6 +4,7 @@ module Database.Distributed.Parser where
 
 import Database.Distributed.Message
 import Database.Distributed.Key
+import Database.Distributed.Utility (white, red, reset)
 
 import Text.ParserCombinators.Parsec
 
@@ -66,10 +67,11 @@ commands =
 
 prompt :: Handle -> IO (Maybe [Message])
 prompt hdl = do
-  void $ hPrintf hdl "$> "
+  void $ hPrintf hdl (white ++ "$> " ++ reset)
   line <- hGetLine hdl
   putStrLn line
   case parse commands "command line" line of
-       Left err -> 
-         hPrintf hdl ("parse error: " ++ show err ++ "\n") >> return Nothing
+       Left err ->
+         hPrintf hdl (red ++ "parse error: " ++ show err ++ reset ++ "\n")
+           >> return Nothing
        Right ms -> return (Just ms)

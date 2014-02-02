@@ -10,6 +10,7 @@ module Database.Distributed.Server where
 import Database.Distributed.Message
 import Database.Distributed.Parser
 import Database.Distributed.Key
+import Database.Distributed.Utility (green, yellow, reset)
 
 import qualified Database.Distributed.StorageMap as StorageMap
 
@@ -69,7 +70,8 @@ registerStr = "database"
 
 repl :: ProcessId -> Int -> Process ()
 repl pid myPort = do
-  liftIO $ void $ printf "Listening on port %d\n" myPort
+  void $ liftIO $ printf
+    ("Listening on port " ++ yellow ++ "%d" ++ reset ++ ".\n") myPort
   sock <- liftIO $ Net.listenOn (Net.PortNumber $ fromIntegral myPort)
   forever $ do
     (hdl, _, _) <- liftIO $ Net.accept sock
@@ -98,7 +100,8 @@ repl2 pid hdl = do
            liftIO $ void $ hPrintf hdl ("recognised: " ++ show cs ++ "\n")
            mapM_ exec cs
 
-
+ok :: String
+ok = green ++ "Ok!" ++ reset
 
 server ::
   Center ->
@@ -140,14 +143,14 @@ server centerKey backend (pm, sm) = do
           if pid /= mypid
              then do send pid msg
                      returnMaps pm sm
-             else do send from "Insert ok!"
+             else do send from ok
                      StorageMap.insert key value sm
                      returnMaps pm sm
 
         database (from, SM msg) = do
           let ks = Bimap.elems pm
           mapM_ (flip send (Broadcast msg)) ks
-          send from "Ok!"
+          send from ok
           returnMaps pm sm
 
 
@@ -201,7 +204,7 @@ master acidsm centerKey backend = do
   liftIO $ print sm
 
   slaves <- liftIO $ findPeers backend 1000
-  say $ "Slaves: " ++ show slaves
+  -- say $ "Slaves: " ++ show slaves
 
   pid <- getSelfPid
   register registerStr pid

@@ -8,6 +8,8 @@
 
 module Database.Distributed.Key where
 
+import Database.Distributed.Utility (yellow, reset)
+
 import Data.Binary (Binary)
 import Data.Typeable
 import GHC.Generics (Generic)
@@ -18,8 +20,13 @@ import Control.Monad.State (put)
 import Data.SafeCopy
 import Data.Acid
 
-newtype Key = Key { unKey :: Int } deriving (Typeable, Generic, Show, Eq, Ord)
+newtype Key = Key { unKey :: Int } deriving (Typeable, Generic, Eq, Ord)
+
 instance Binary Key
+
+
+instance Show Key where
+  show (Key k) = "Key {unKey = " ++ yellow ++ show k ++ reset ++ "}"
 
 type Center = Key
 

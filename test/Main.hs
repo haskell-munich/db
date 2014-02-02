@@ -18,7 +18,7 @@ import System.Directory (createDirectoryIfMissing)
 import System.FilePath.Posix ((</>))
 import System.Random
 
-import Data.Acid (openLocalStateFrom)
+import Data.Acid (openLocalStateFrom, closeAcidState)
 
 remotable []
 
@@ -27,6 +27,7 @@ host = "localhost"
 
 dbdir :: String
 dbdir = "database"
+
 
 
 main :: IO ()
@@ -39,7 +40,7 @@ main = do
 
 
 
-  centerdb <- openLocalStateFrom (dir </> "center") (Nothing :: MaybeCenter)
+  centerdb <- openLocalStateFrom (dir </> "center") Nothing
 
   key <- getCenter centerdb
   thecenter <-
@@ -50,8 +51,10 @@ main = do
            return (Key center)
          Just tc -> return tc
 
+  closeAcidState centerdb
 
-  putStrLn ("Starting with center " ++ show thecenter)
+
+  putStrLn ("Starting with center " ++ show thecenter ++ "...")
 
 
   backend <- initializeBackend host theport (__remoteTable initRemoteTable)
