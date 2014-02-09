@@ -81,6 +81,7 @@ repl pid myPort = do
 
 repl2 :: ProcessId -> Handle -> Process ()
 repl2 pid hdl = do
+  liftIO $ putStrLn (green ++ "connected..." ++ reset)
   liftIO $ hSetNewlineMode hdl universalNewlineMode
   liftIO $ hSetBuffering hdl NoBuffering
   mypid <- getSelfPid
@@ -103,24 +104,32 @@ repl2 pid hdl = do
 ok :: String
 ok = green ++ "Ok!" ++ reset
 
+data Application =
+  Application {
+    processMap :: ProcessMap,
+    acidStorageMap :: Map.Map Key Value }
+--    acidStorageMap :: AcidState StorageMap.T }
+
 server ::
   Center ->
   Backend ->
-  (ProcessMap, AcidState StorageMap.T) ->
+  Application ->
   Process ()
-server centerKey backend (pm, sm) = do
-  m <- receiveWait $
-         match database :
-         match whereIsReply :
-         match processMessage :
-         match monitorEvent :
-         match broadcastEvent :
-         []
-  server centerKey backend m
-  where
-        returnMaps pmap smap = return (pmap, smap)
+server centerKey backend (Application pm sm) =
+  server centerKey backend =<< receiveWait ms
 
-        database msg@(from, (Lookup key)) = do
+  where
+
+        ms = match database :
+             match whereIsReply :
+             match processMessage :
+             match monitorEvent :
+             match broadcastEvent :
+             []
+
+        returnApp pmap smap = return (Application pmap smap)
+
+        database msg@(from, Lookup key) = do
           let pid =
                 case responsibleProcess pm key of
                      (q:_) -> q
@@ -129,52 +138,71 @@ server centerKey backend (pm, sm) = do
           mypid <- getSelfPid
           if pid /= mypid
              then send pid msg
-             else do v <- StorageMap.lookup key sm
+             else do -- v <- StorageMap.lookup key sm
+                     let v = Map.lookup key sm
                      send from v
-          returnMaps pm sm
+          returnApp pm sm
 
-        database msg@(from, (Insert key value)) = do
-          let (p, pid) =
+        database msg@(from, Insert key value) = do
+          let pid =
                 case responsibleProcess pm key of
-                     r@(q:_) -> (r, q)
+                     (q:_) -> q
                      _ -> error "Server.server: no responsible process found"
-          liftIO $ print p
           mypid <- getSelfPid
           if pid /= mypid
              then do send pid msg
-                     returnMaps pm sm
+                     returnApp pm sm
              else do send from ok
-                     StorageMap.insert key value sm
-                     returnMaps pm sm
+                     -- StorageMap.insert key value sm
+                     let newSm = Map.insert key value sm
+                     returnApp pm newSm
+
+        database msg@(from, Delete key) = do
+          let pid =
+                case responsibleProcess pm key of
+                     (q:_) -> q
+                     _ -> error "Server.server: no responsible process found"
+          mypid <- getSelfPid
+          if pid /= mypid
+             then do send pid msg
+                     returnApp pm sm
+             else do send from ok
+                     -- StorageMap.delete key sm
+                     let newSm = Map.delete key sm
+                     returnApp pm newSm
+
+
 
         database (from, SM msg) = do
           let ks = Bimap.elems pm
           mapM_ (flip send (Broadcast msg)) ks
           send from ok
-          returnMaps pm sm
+          returnApp pm sm
 
-
-        database msg = do
-          liftIO $ print $ "server.database: " ++ show msg
-          undefined
 
         broadcastEvent (Broadcast ShowCenter) = do
           liftIO $ putStrLn ("My center is " ++ show centerKey ++ ".")
-          returnMaps pm sm
+          returnApp pm sm
 
         broadcastEvent (Broadcast ShowStorageMap) = do
-          smap <- StorageMap.getStorageMap sm
-          liftIO $ print smap
-          returnMaps pm sm
+          -- smap <- StorageMap.getStorageMap sm
+          
+          liftIO $ print sm
+          returnApp pm sm
 
         broadcastEvent (Broadcast ShowProcessMap) = do
           liftIO $ print pm
-          returnMaps pm sm
+          returnApp pm sm
+
+        broadcastEvent (Broadcast ShowStorageSize) = do
+          liftIO $ putStrLn ("My size is " ++ show (Map.size sm) ++ ".")
+          returnApp pm sm
+
 
         whereIsReply (WhereIsReply _ (Just pid)) = do
           mypid <- getSelfPid
           send pid (AskCenter mypid centerKey)
-          returnMaps pm sm
+          returnApp pm sm
 
         whereIsReply msg = do
           liftIO $ print $ "whereIsReply.database " ++ show msg
@@ -184,16 +212,16 @@ server centerKey backend (pm, sm) = do
           let newpm = Bimap.insert ck pid pm
           mypid <- getSelfPid
           send pid (TellCenter mypid centerKey)
-          returnMaps newpm sm
+          returnApp newpm sm
 
         processMessage (TellCenter pid ck) = do
           let newpm = Bimap.insert ck pid pm
           void $ monitor pid
-          returnMaps newpm sm
+          returnApp newpm sm
 
         monitorEvent (ProcessMonitorNotification _ pid _) = do
           let newpm = Bimap.deleteR pid pm
-          returnMaps newpm sm
+          returnApp newpm sm
 
 
 
@@ -212,5 +240,5 @@ master acidsm centerKey backend = do
   void $ spawnLocal $ repl pid (10000 + unKey centerKey)
 
   mapM_ (flip whereisRemoteAsync registerStr) slaves
-  server centerKey backend (Bimap.empty, acidsm)
+  server centerKey backend (Application Bimap.empty Map.empty)
 

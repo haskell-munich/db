@@ -8,7 +8,7 @@ import Database.Distributed.Utility (white, red, reset)
 
 import Text.ParserCombinators.Parsec
 
-import System.IO (hGetLine, Handle)
+import System.IO (hGetLine, Handle, hClose)
 
 import Text.Printf (hPrintf)
 
@@ -57,8 +57,11 @@ stoMap = symbol "sto" >> return ShowStorageMap
 proMap :: Parser ShowMessage
 proMap = symbol "pro" >> return ShowProcessMap
 
+size :: Parser ShowMessage
+size = symbol "size" >> return ShowStorageSize
+
 showCmd :: Parser Message
-showCmd = symbol "show" *> liftA SM (center <|> stoMap <|> proMap)
+showCmd = symbol "show" *> liftA SM (center <|> proMap <|> try stoMap <|> size)
 
 commands :: Parser [Message]
 commands =
@@ -69,9 +72,11 @@ prompt :: Handle -> IO (Maybe [Message])
 prompt hdl = do
   void $ hPrintf hdl (white ++ "$> " ++ reset)
   line <- hGetLine hdl
-  putStrLn line
-  case parse commands "command line" line of
-       Left err ->
-         hPrintf hdl (red ++ "parse error: " ++ show err ++ reset ++ "\n")
-           >> return Nothing
-       Right ms -> return (Just ms)
+  if (line == "quit")
+    then do hClose hdl
+            return Nothing
+    else case parse commands "command line" line of
+              Left err ->
+                hPrintf hdl (red ++ "parse error: " ++ show err ++ reset ++ "\n")
+                  >> return Nothing
+              Right ms -> return (Just ms)

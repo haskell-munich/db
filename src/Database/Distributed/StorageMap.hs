@@ -30,6 +30,15 @@ insertX k v = do
   T sm <- get
   put (T $ Map.insert k v sm)
 
+
+
+deleteX :: Key -> Update T ()
+deleteX k = do
+  T sm <- get
+  put (T $ Map.delete k sm)
+
+
+
 lookupX :: Key -> Query T (Maybe Value)
 lookupX k = do
   T sm <- ask
@@ -38,7 +47,7 @@ lookupX k = do
 getStorageMapX :: Query T (Map Key Value)
 getStorageMapX = ask >>= return . unStorageMap
 
-$(makeAcidic ''T ['insertX, 'lookupX, 'getStorageMapX])
+$(makeAcidic ''T ['insertX, 'deleteX, 'lookupX, 'getStorageMapX])
 
 
 empty :: T
@@ -51,6 +60,12 @@ insert ::
   Process ()
 insert k v db = void $ liftIO $ update db (InsertX k v)
 
+
+delete ::
+  Key ->
+  AcidState (EventState DeleteX) ->
+  Process ()
+delete k db = void $ liftIO $ update db (DeleteX k)
 
 lookup ::
   Key ->
